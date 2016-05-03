@@ -1,31 +1,246 @@
-import knex from 'knex';
-import Promise from 'bluebird';
-import { contains, unique } from 'mout/array'
-import { isEmpty, isObject, isString, toString } from 'mout/lang';
-import { deepMixIn, forOwn, get, omit } from 'mout/object'
-import { underscore } from 'mout/string';
-import { DSUtils } from 'js-data';
-const { removeCircular } = DSUtils;
+import knex from 'knex'
+import Promise from 'bluebird'
+import {utils} from 'js-data'
+utils.Promise = Promise
 
-let reserved = [
-  'orderBy',
-  'sort',
-  'limit',
-  'offset',
-  'skip',
-  'where'
-]
+import {
+  Adapter,
+  reserved
+} from 'js-data-adapter'
+import toString from 'mout/lang/toString'
+import underscore from 'mout/string/underscore'
 
-function getTable (resourceConfig) {
-  return resourceConfig.table || underscore(resourceConfig.name)
+const DEFAULTS = {}
+
+const equal = function (query, field, value, isOr) {
+  if (value === null) {
+    return query[isOr ? 'orWhereNull' : 'whereNull'](field)
+  }
+  return query[getWhereType(isOr)](field, value)
 }
 
+const notEqual = function (query, field, value, isOr) {
+  if (value === null) {
+    return query[isOr ? 'orWhereNotNull' : 'whereNotNull'](field)
+  }
+  return query[getWhereType(isOr)](field, '!=', value)
+}
+
+const getWhereType = function (isOr) {
+  return isOr ? 'orWhere' : 'where'
+}
+
+const MILES_REGEXP = /(\d+(\.\d+)?)\s*(m|M)iles$/
+const KILOMETERS_REGEXP = /(\d+(\.\d+)?)\s*(k|K)$/
+
+/**
+ * Default predicate functions for the filtering operators.
+ *
+ * @name module:js-data-sql.OPERATORS
+ * @property {Function} == Equality operator.
+ * @property {Function} != Inequality operator.
+ * @property {Function} > "Greater than" operator.
+ * @property {Function} >= "Greater than or equal to" operator.
+ * @property {Function} < "Less than" operator.
+ * @property {Function} <= "Less than or equal to" operator.
+ * @property {Function} isectEmpty Operator to test that the intersection
+ * between two arrays is empty. Not supported.
+ * @property {Function} isectNotEmpty Operator to test that the intersection
+ * between two arrays is NOT empty. Not supported.
+ * @property {Function} in Operator to test whether a value is found in the
+ * provided array.
+ * @property {Function} notIn Operator to test whether a value is NOT found in
+ * the provided array.
+ * @property {Function} contains Operator to test whether an array contains the
+ * provided value. Not supported.
+ * @property {Function} notContains Operator to test whether an array does NOT
+ * contain the provided value. Not supported.
+ */
+export const OPERATORS = {
+  '==': equal,
+  '===': equal,
+  '!=': notEqual,
+  '!==': notEqual,
+  '>': function (query, field, value, isOr) {
+    return query[getWhereType(isOr)](field, '>', value)
+  },
+  '>=': function (query, field, value, isOr) {
+    return query[getWhereType(isOr)](field, '>=', value)
+  },
+  '<': function (query, field, value, isOr) {
+    return query[getWhereType(isOr)](field, '<', value)
+  },
+  '<=': function (query, field, value, isOr) {
+    return query[getWhereType(isOr)](field, '<=', value)
+  },
+  'isectEmpty': function (query, field, value, isOr) {
+    throw new Error('isectEmpty not supported!')
+  },
+  'isectNotEmpty': function (query, field, value, isOr) {
+    throw new Error('isectNotEmpty not supported!')
+  },
+  'in': function (query, field, value, isOr) {
+    return query[getWhereType(isOr)](field, 'in', value)
+  },
+  'notIn': function (query, field, value, isOr) {
+    return query[isOr ? 'orNotIn' : 'notIn'](field, value)
+  },
+  'contains': function (query, field, value, isOr) {
+    throw new Error('contains not supported!')
+  },
+  'notContains': function (query, field, value, isOr) {
+    throw new Error('notContains not supported!')
+  },
+  'like': function (query, field, value, isOr) {
+    return query[getWhereType(isOr)](field, 'like', value)
+  },
+  'near': function (query, field, value, isOr) {
+    let radius
+    let unitsPerDegree
+    if (typeof value.radius === 'number' || MILES_REGEXP.test(value.radius)) {
+      radius = typeof value.radius === 'number' ? value.radius : value.radius.match(MILES_REGEXP)[1]
+      unitsPerDegree = 69.0 // miles per degree
+    } else if (KILOMETERS_REGEXP.test(value.radius)) {
+      radius = value.radius.match(KILOMETERS_REGEXP)[1]
+      unitsPerDegree = 111.045 // kilometers per degree;
+    } else {
+      throw new Error('Unknown radius distance units')
+    }
+
+    let [latitudeColumn, longitudeColumn] = field.split(',').map((c) => c.trim())
+    let [latitude, longitude] = value.center
+
+    // Uses indexes on `latitudeColumn` / `longitudeColumn` if available
+    query = query
+      .whereBetween(latitudeColumn, [
+        latitude - (radius / unitsPerDegree),
+        latitude + (radius / unitsPerDegree)
+      ])
+      .whereBetween(longitudeColumn, [
+        longitude - (radius / (unitsPerDegree * Math.cos(latitude * (Math.PI / 180)))),
+        longitude + (radius / (unitsPerDegree * Math.cos(latitude * (Math.PI / 180))))
+      ])
+
+    if (value.calculateDistance) {
+      let distanceColumn = (typeof value.calculateDistance === 'string') ? value.calculateDistance : 'distance'
+      query = query.select(knex.raw(`
+        ${unitsPerDegree} * DEGREES(ACOS(
+          COS(RADIANS(?)) * COS(RADIANS(${latitudeColumn})) *
+          COS(RADIANS(${longitudeColumn}) - RADIANS(?)) +
+          SIN(RADIANS(?)) * SIN(RADIANS(${latitudeColumn}))
+        )) AS ${distanceColumn}`, [latitude, longitude, latitude]))
+    }
+    return query
+  }
+}
+
+Object.freeze(OPERATORS)
+
+/**
+ * SqlAdapter class.
+ *
+ * @example
+ * // Use Container instead of DataStore on the server
+ * import {Container} from 'js-data'
+ * import SqlAdapter from 'js-data-sql'
+ *
+ * // Create a store to hold your Mappers
+ * const store = new Container()
+ *
+ * // Create an instance of SqlAdapter with default settings
+ * const adapter = new SqlAdapter()
+ *
+ * // Mappers in "store" will use the Sql adapter by default
+ * store.registerAdapter('sql', adapter, { default: true })
+ *
+ * // Create a Mapper that maps to a "user" table
+ * store.defineMapper('user')
+ *
+ * @class SqlAdapter
+ * @extends Adapter
+ * @param {Object} [opts] Configuration options.
+ * @param {boolean} [opts.debug=false] See {@link Adapter#debug}.
+ * @param {Object} [opts.operators] See {@link SqlAdapter#operators}.
+ * @param {boolean} [opts.raw=false] See {@link Adapter#raw}.
+ */
+export function SqlAdapter (opts) {
+  const self = this
+  utils.classCallCheck(self, SqlAdapter)
+  opts || (opts = {})
+  opts.knexOptions || (opts.knexOptions = {})
+  utils.fillIn(opts, DEFAULTS)
+
+  Object.defineProperty(self, 'knex', {
+    writable: true,
+    value: undefined
+  })
+
+  Adapter.call(self, opts)
+
+  self.knex || (self.knex = knex(self.knexOptions))
+
+  /**
+   * Override the default predicate functions for specified operators.
+   *
+   * @name SqlAdapter#operators
+   * @type {Object}
+   * @default {}
+   */
+  self.operators || (self.operators = {})
+
+  utils.fillIn(self.operators, OPERATORS)
+}
+
+// Setup prototype inheritance from Adapter
+SqlAdapter.prototype = Object.create(Adapter.prototype, {
+  constructor: {
+    value: SqlAdapter,
+    enumerable: false,
+    writable: true,
+    configurable: true
+  }
+})
+
+Object.defineProperty(SqlAdapter, '__super__', {
+  configurable: true,
+  value: Adapter
+})
+
+/**
+ * Alternative to ES2015 class syntax for extending `SqlAdapter`.
+ *
+ * @example <caption>Using the ES2015 class syntax.</caption>
+ * class MySqlAdapter extends SqlAdapter {...}
+ * const adapter = new MySqlAdapter()
+ *
+ * @example <caption>Using {@link SqlAdapter.extend}.</caption>
+ * var instanceProps = {...}
+ * var classProps = {...}
+ *
+ * var MySqlAdapter = SqlAdapter.extend(instanceProps, classProps)
+ * var adapter = new MySqlAdapter()
+ *
+ * @method SqlAdapter.extend
+ * @static
+ * @param {Object} [instanceProps] Properties that will be added to the
+ * prototype of the subclass.
+ * @param {Object} [classProps] Properties that will be added as static
+ * properties to the subclass itself.
+ * @return {Constructor} Subclass of `SqlAdapter`.
+ */
+SqlAdapter.extend = utils.extend
+
+function getTable (mapper) {
+  return mapper.table || underscore(mapper.name)
+}
+
+/*
 function processRelationField (resourceConfig, query, field, criteria, options, joinedTables) {
   let fieldParts = field.split('.')
   let localResourceConfig = resourceConfig
   let relationPath = []
   let relationName = null;
-  
+
   while (fieldParts.length >= 2) {
     relationName = fieldParts.shift()
     let [relation] = localResourceConfig.relationList.filter(r => r.relation === relationName || r.localField === relationName)
@@ -33,7 +248,7 @@ function processRelationField (resourceConfig, query, field, criteria, options, 
     if (relation) {
       let relationResourceConfig = resourceConfig.getResource(relation.relation)
       relationPath.push(relation.relation)
-      
+
       if (relation.type === 'belongsTo' || relation.type === 'hasOne') {
         // Apply table join for belongsTo/hasOne property (if not done already)
         if (!joinedTables.some(t => t === relationPath.join('.'))) {
@@ -66,14 +281,14 @@ function processRelationField (resourceConfig, query, field, criteria, options, 
           query.whereExists(subQuery);
         }
       }
-      
+
       localResourceConfig = relationResourceConfig
     } else {
       // hopefully a qualified local column
     }
   }
   relationName = fieldParts.shift();
-  
+
   return relationName ? `${getTable(localResourceConfig)}.${relationName}` : null;
 }
 
@@ -110,7 +325,7 @@ function loadWithRelations (items, resourceConfig, options) {
       if ((def.type === 'hasOne' || def.type === 'hasMany') && def.foreignKey) {
         task = this.findAll(resourceConfig.getResource(relationName), {
           where: {
-            [def.foreignKey]: instance ? 
+            [def.foreignKey]: instance ?
               { '==': instance[def.localKey || resourceConfig.idAttribute] } :
               { 'in': items.map(item => item[def.localKey || resourceConfig.idAttribute]) }
           }
@@ -211,297 +426,334 @@ function loadWithRelations (items, resourceConfig, options) {
   }
   return Promise.all(tasks)
 }
+*/
 
-class DSSqlAdapter {
-  constructor (options) {
-    this.defaults = {}
-    options = options || {}
-    
-    if (options.queryOperators) {
-      this.queryOperators = options.queryOperators;
-      delete options.queryOperators;
-    }
-    
-    if (options.__knex__) {
-      this.query = options
-    } else {
-      this.query = knex(options)
-    }
-    deepMixIn(this.defaults, options)
-  }
+utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
+  _count (mapper, query, opts) {
+    const self = this
+    opts || (opts = {})
+    query || (query = {})
 
-  find (resourceConfig, id, options) {
-    let instance
-    options = options || {}
-    options.with = options.with || []
-    let table = getTable(resourceConfig);
-    let query = options && options.transaction || this.query
-    return query
-      .select(`${table}.*`)
-      .from(table)
-      .where(`${table}.${resourceConfig.idAttribute}`, toString(id))
-      .then(rows => {
-        if (!rows.length) {
-          return Promise.reject(new Error('Not Found!'))
-        } else {
-          instance = rows[0]
-          return loadWithRelations.call(this, instance, resourceConfig, options)
-        }
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
+      .count('* as count')
+      .then(function (rows) {
+        return [rows[0].count, {}]
       })
-      .then(() => instance)
-  }
+  },
 
-  findAll (resourceConfig, params, options) {
-    let items = null
-    options = options || {}
-    options.with = options.with || []
-    return this.filterQuery(resourceConfig, params, options).then(_items => {
-      items = _items
-      return loadWithRelations.call(this, _items, resourceConfig, options)
-    }).then(() => items)
-  }
+  _create (mapper, props, opts) {
+    const self = this
+    const idAttribute = mapper.idAttribute
+    props || (props = {})
+    opts || (opts = {})
 
-  create (resourceConfig, attrs, options) {
-    attrs = removeCircular(omit(attrs, resourceConfig.relationFields || []))
-    let query = options && options.transaction || this.query
-    return query(getTable(resourceConfig))
-      .insert(attrs, resourceConfig.idAttribute)
-      .then(ids => {
-        if (attrs[resourceConfig.idAttribute]) {
-          return this.find(resourceConfig, attrs[resourceConfig.idAttribute], options)
-        } else if (ids.length) {
-          return this.find(resourceConfig, ids[0], options)
-        } else {
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    return sqlBuilder(getTable(mapper))
+      .insert(props, idAttribute)
+      .then(function (ids) {
+        const id = utils.isUndefined(props[idAttribute]) ? (ids.length ? ids[0] : undefined) : props[idAttribute]
+        if (utils.isUndefined(id)) {
           throw new Error('Failed to create!')
         }
+        return self._find(mapper, id, opts).then(function (result) {
+          return [result[0], { ids }]
+        })
       })
-  }
+  },
 
-  update (resourceConfig, id, attrs, options) {
-    attrs = removeCircular(omit(attrs, resourceConfig.relationFields || []))
-    let query = options && options.transaction || this.query
-    return query(getTable(resourceConfig))
-      .where(resourceConfig.idAttribute, toString(id))
-      .update(attrs)
-      .then(() => this.find(resourceConfig, id, options))
-  }
+  _createMany (mapper, props, opts) {
+    const self = this
+    props || (props = {})
+    opts || (opts = {})
 
-  updateAll (resourceConfig, attrs, params, options) {
-    attrs = removeCircular(omit(attrs, resourceConfig.relationFields || []))
-    return this.filterQuery(resourceConfig, params, options).then(items => {
-      return items.map(item => item[resourceConfig.idAttribute])
-    }).then(ids => {
-      return this.filterQuery(resourceConfig, params, options).update(attrs).then(() => {
-        let _params = {where: {}}
-        _params.where[resourceConfig.idAttribute] = {
-          'in': ids
-        }
-        return this.filterQuery(resourceConfig, _params, options)
-      })
+    return Promise.all(props.map(function (record) {
+      return self._create(mapper, record, opts)
+    })).then(function (results) {
+      return [results.map(function (result) {
+        return result[0]
+      }), {}]
     })
-  }
+  },
 
-  destroy (resourceConfig, id, options) {
-    let query = options && options.transaction || this.query
-    return query(getTable(resourceConfig))
-      .where(resourceConfig.idAttribute, toString(id))
-      .del().then(() => undefined)
-  }
+  _destroy (mapper, id, opts) {
+    const self = this
+    opts || (opts = {})
 
-  destroyAll (resourceConfig, params, options) {
-    return this.filterQuery(resourceConfig, params, options).del().then(() => undefined)
-  }
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    return sqlBuilder(getTable(mapper))
+      .where(mapper.idAttribute, toString(id))
+      .del()
+      .then(function () {
+        return [undefined, {}]
+      })
+  },
 
-  filterQuery (resourceConfig, params, options) {
-    let table = getTable(resourceConfig)
-    let joinedTables = []
-    let query
+  _destroyAll (mapper, query, opts) {
+    const self = this
+    query || (query = {})
+    opts || (opts = {})
 
-    if (params instanceof Object.getPrototypeOf(this.query.client).QueryBuilder) {
-      query = params
-      params = {}
-    } else if (options && options.query) {
-      query = options.query || this.query
-    } else {
-      query = options && options.transaction || this.query
-      query = query.select(`${table}.*`).from(table)
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
+      .del()
+      .then(function () {
+        return [undefined, {}]
+      })
+  },
+
+  _find (mapper, id, opts) {
+    const self = this
+    opts || (opts = {})
+
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    const table = getTable(mapper)
+    return sqlBuilder
+      .select(`${table}.*`)
+      .from(table)
+      .where(`${table}.${mapper.idAttribute}`, toString(id))
+      .then(function (rows) {
+        if (!rows || !rows.length) {
+          return [undefined, {}]
+        }
+        return [rows[0], {}]
+      })
+  },
+
+  _findAll (mapper, query, opts) {
+    const self = this
+    query || (query = {})
+    opts || (opts = {})
+
+    return self.filterQuery(self.selectTable(mapper, opts), query, opts).then(function (rows) {
+      return [rows || [], {}]
+    })
+  },
+
+  _sum (mapper, field, query, opts) {
+    const self = this
+    if (!utils.isString(field)) {
+      throw new Error('field must be a string!')
     }
+    opts || (opts = {})
+    query || (query = {})
 
-    params = params || {}
-    params.where = params.where || {}
-    params.orderBy = params.orderBy || params.sort
-    params.skip = params.skip || params.offset
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
+      .sum(`${field} as sum`)
+      .then(function (rows) {
+        return [rows[0].sum || 0, {}]
+      })
+  },
 
-    Object.keys(params).forEach(k => {
-      let v = params[k]
-      if (!contains(reserved, k)) {
-        if (isObject(v)) {
-          params.where[k] = v
+  _update (mapper, id, props, opts) {
+    const self = this
+    props || (props = {})
+    opts || (opts = {})
+
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    return sqlBuilder(getTable(mapper))
+      .where(mapper.idAttribute, toString(id))
+      .update(props)
+      .then(function () {
+        return self._find(mapper, id, opts)
+      })
+      .then(function (result) {
+        if (!result[0]) {
+          throw new Error('Not Found')
+        }
+        return result
+      })
+  },
+
+  _updateAll (mapper, props, query, opts) {
+    const self = this
+    const idAttribute = mapper.idAttribute
+    props || (props = {})
+    query || (query = {})
+    opts || (opts = {})
+
+    let ids
+
+    return self._findAll(mapper, query, opts).then(function (result) {
+      const records = result[0]
+      ids = records.map(function (record) {
+        return record[idAttribute]
+      })
+      const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+      return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts).update(props)
+    }).then(function () {
+      const _query = { where: {} }
+      _query.where[idAttribute] = { 'in': ids }
+      return self._findAll(mapper, _query, opts)
+    })
+  },
+
+  _updateMany (mapper, records, opts) {
+    const self = this
+    const idAttribute = mapper.idAttribute
+    records || (records = [])
+    opts || (opts = {})
+
+    return Promise.all(records.map(function (record) {
+      return self._update(mapper, record[idAttribute], record, opts)
+    })).then(function (results) {
+      return [results.map(function (result) {
+        return result[0]
+      }), {}]
+    })
+  },
+
+  filterQuery (sqlBuilder, query, opts) {
+    const self = this
+
+    query = utils.plainCopy(query || {})
+    opts || (opts = {})
+    opts.operators || (opts.operators = {})
+    query.where || (query.where = {})
+    query.orderBy || (query.orderBy = query.sort)
+    query.orderBy || (query.orderBy = [])
+    query.skip || (query.skip = query.offset)
+
+    // Transform non-keyword properties to "where" clause configuration
+    utils.forOwn(query, function (config, keyword) {
+      if (reserved.indexOf(keyword) === -1) {
+        if (utils.isObject(config)) {
+          query.where[keyword] = config
         } else {
-          params.where[k] = {
-            '==': v
+          query.where[keyword] = {
+            '==': config
           }
         }
-        delete params[k]
+        delete query[keyword]
       }
     })
 
-    if (!isEmpty(params.where)) {
-      forOwn(params.where, (criteria, field) => {
-        if (!isObject(criteria)) {
-          params.where[field] = {
-            '==': criteria
-          }
+    // Filter
+    if (Object.keys(query.where).length !== 0) {
+      // Apply filter for each field
+      utils.forOwn(query.where, function (criteria, field) {
+        if (!utils.isObject(criteria)) {
+          criteria = { '==': criteria }
         }
-        
-        if (contains(field, '.')) {
-          if (contains(field, ',')) {
-            let splitFields = field.split(',').map(c => c.trim())
-            field = splitFields.map(splitField => processRelationField.call(this, resourceConfig, query, splitField, criteria, options, joinedTables)).join(',')
+        // Apply filter for each operator
+        utils.forOwn(criteria, function (value, operator) {
+          let isOr = false
+          if (operator && operator[0] === '|') {
+            operator = operator.substr(1)
+            isOr = true
+          }
+          let predicateFn = self.getOperator(operator, opts)
+          if (predicateFn) {
+            sqlBuilder = predicateFn(sqlBuilder, field, value, isOr)
           } else {
-            field = processRelationField.call(this, resourceConfig, query, field, criteria, options, joinedTables)
+            throw new Error(`Operator ${operator} not supported!`)
           }
-        }
-        
-        if (field) {
-          forOwn(criteria, (v, op) => {
-            if (op in (this.queryOperators || {})) {
-              // Custom or overridden operator
-              query = this.queryOperators[op](query, field, v)
-            } else {
-              // Builtin operators
-              if (op === '==' || op === '===') {
-                if (v === null) {
-                  query = query.whereNull(field)
-                } else {
-                  query = query.where(field, v)
-                }
-              } else if (op === '!=' || op === '!==') {
-                if (v === null) {
-                  query = query.whereNotNull(field)
-                } else {
-                  query = query.where(field, '!=', v)
-                }
-              } else if (op === '>') {
-                query = query.where(field, '>', v)
-              } else if (op === '>=') {
-                query = query.where(field, '>=', v)
-              } else if (op === '<') {
-                query = query.where(field, '<', v)
-              } else if (op === '<=') {
-                query = query.where(field, '<=', v)
-              // } else if (op === 'isectEmpty') {
-              //  subQuery = subQuery ? subQuery.and(row(field).default([]).setIntersection(r.expr(v).default([])).count().eq(0)) : row(field).default([]).setIntersection(r.expr(v).default([])).count().eq(0)
-              // } else if (op === 'isectNotEmpty') {
-              //  subQuery = subQuery ? subQuery.and(row(field).default([]).setIntersection(r.expr(v).default([])).count().ne(0)) : row(field).default([]).setIntersection(r.expr(v).default([])).count().ne(0)
-              } else if (op === 'in') {
-                query = query.where(field, 'in', v)
-              } else if (op === 'notIn') {
-                query = query.whereNotIn(field, v)
-              } else if (op === 'near') {
-                const milesRegex = /(\d+(\.\d+)?)\s*(m|M)iles$/
-                const kilometersRegex = /(\d+(\.\d+)?)\s*(k|K)$/
-
-                let radius
-                let unitsPerDegree
-                if (typeof v.radius === 'number' || milesRegex.test(v.radius)) {
-                  radius = typeof v.radius === 'number' ? v.radius : v.radius.match(milesRegex)[1]
-                  unitsPerDegree = 69.0 // miles per degree
-                } else if (kilometersRegex.test(v.radius)) {
-                  radius = v.radius.match(kilometersRegex)[1]
-                  unitsPerDegree = 111.045 // kilometers per degree;
-                } else {
-                  throw new Error('Unknown radius distance units')
-                }
-
-                let [latitudeColumn, longitudeColumn] = field.split(',').map(c => c.trim())
-                let [latitude, longitude] = v.center
-
-                // Uses indexes on `latitudeColumn` / `longitudeColumn` if available
-                query = query
-                  .whereBetween(latitudeColumn, [
-                    latitude - (radius / unitsPerDegree),
-                    latitude + (radius / unitsPerDegree)
-                  ])
-                  .whereBetween(longitudeColumn, [
-                    longitude - (radius / (unitsPerDegree * Math.cos(latitude * (Math.PI / 180)))),
-                    longitude + (radius / (unitsPerDegree * Math.cos(latitude * (Math.PI / 180))))
-                  ])
-
-                if (v.calculateDistance) {
-                  let distanceColumn = (typeof v.calculateDistance === 'string') ? v.calculateDistance : 'distance'
-                  query = query.select(knex.raw(`
-                    ${unitsPerDegree} * DEGREES(ACOS(
-                      COS(RADIANS(?)) * COS(RADIANS(${latitudeColumn})) *
-                      COS(RADIANS(${longitudeColumn}) - RADIANS(?)) +
-                      SIN(RADIANS(?)) * SIN(RADIANS(${latitudeColumn}))
-                    )) AS ${distanceColumn}`, [latitude, longitude, latitude]))
-                }
-              } else if (op === 'like') {
-                query = query.where(field, 'like', v)
-              } else if (op === '|like') {
-                query = query.orWhere(field, 'like', v)
-              } else if (op === '|==' || op === '|===') {
-                if (v === null) {
-                  query = query.orWhereNull(field)
-                } else {
-                  query = query.orWhere(field, v)
-                }
-              } else if (op === '|!=' || op === '|!==') {
-                if (v === null) {
-                  query = query.orWhereNotNull(field)
-                } else {
-                  query = query.orWhere(field, '!=', v)
-                }
-              } else if (op === '|>') {
-                query = query.orWhere(field, '>', v)
-              } else if (op === '|>=') {
-                query = query.orWhere(field, '>=', v)
-              } else if (op === '|<') {
-                query = query.orWhere(field, '<', v)
-              } else if (op === '|<=') {
-                query = query.orWhere(field, '<=', v)
-              // } else if (op === '|isectEmpty') {
-              //  subQuery = subQuery ? subQuery.or(row(field).default([]).setIntersection(r.expr(v).default([])).count().eq(0)) : row(field).default([]).setIntersection(r.expr(v).default([])).count().eq(0)
-              // } else if (op === '|isectNotEmpty') {
-              //  subQuery = subQuery ? subQuery.or(row(field).default([]).setIntersection(r.expr(v).default([])).count().ne(0)) : row(field).default([]).setIntersection(r.expr(v).default([])).count().ne(0)
-              } else if (op === '|in') {
-                query = query.orWhere(field, 'in', v)
-              } else if (op === '|notIn') {
-                query = query.orWhereNotIn(field, v)
-              } else {
-                throw new Error('Operator not found')
-              }
-            }
-          })
-        }
+        })
       })
     }
 
-    if (params.orderBy) {
-      if (isString(params.orderBy)) {
-        params.orderBy = [
-          [params.orderBy, 'asc']
+    // Sort
+    if (query.orderBy) {
+      if (utils.isString(query.orderBy)) {
+        query.orderBy = [
+          [query.orderBy, 'asc']
         ]
       }
-      for (var i = 0; i < params.orderBy.length; i++) {
-        if (isString(params.orderBy[i])) {
-          params.orderBy[i] = [params.orderBy[i], 'asc']
+      for (var i = 0; i < query.orderBy.length; i++) {
+        if (utils.isString(query.orderBy[i])) {
+          query.orderBy[i] = [query.orderBy[i], 'asc']
         }
-        query = params.orderBy[i][1].toUpperCase() === 'DESC' ? query.orderBy(params.orderBy[i][0], 'desc') : query.orderBy(params.orderBy[i][0], 'asc')
+        sqlBuilder = sqlBuilder.orderBy(query.orderBy[i][0], (query.orderBy[i][1] || '').toUpperCase() === 'DESC' ? 'desc' : 'asc')
       }
     }
 
-    if (params.skip) {
-      query = query.offset(+params.offset)
+    // Offset
+    if (query.skip) {
+      sqlBuilder = sqlBuilder.offset(+query.skip)
     }
 
-    if (params.limit) {
-      query = query.limit(+params.limit)
+    // Limit
+    if (query.limit) {
+      sqlBuilder = sqlBuilder.limit(+query.limit)
     }
 
-    return query
+    return sqlBuilder
+    // if (!isEmpty(params.where)) {
+    //   forOwn(params.where, (criteria, field) => {
+    //     if (contains(field, '.')) {
+    //       if (contains(field, ',')) {
+    //         let splitFields = field.split(',').map(c => c.trim())
+    //         field = splitFields.map(splitField => processRelationField.call(this, resourceConfig, query, splitField, criteria, options, joinedTables)).join(',')
+    //       } else {
+    //         field = processRelationField.call(this, resourceConfig, query, field, criteria, options, joinedTables)
+    //       }
+    //     }
+    //   })
+    // }
+  },
+
+  /**
+   * Resolve the predicate function for the specified operator based on the
+   * given options and this adapter's settings.
+   *
+   * @name SqlAdapter#getOperator
+   * @method
+   * @param {string} operator The name of the operator.
+   * @param {Object} [opts] Configuration options.
+   * @param {Object} [opts.operators] Override the default predicate functions
+   * for specified operators.
+   * @return {*} The predicate function for the specified operator.
+   */
+  getOperator (operator, opts) {
+    opts || (opts = {})
+    opts.operators || (opts.operators = {})
+    let ownOps = this.operators || {}
+    return utils.isUndefined(opts.operators[operator]) ? ownOps[operator] : opts.operators[operator]
+  },
+
+  getTable (mapper) {
+    return mapper.table || underscore(mapper.name)
+  },
+
+  selectTable (mapper, opts) {
+    const self = this
+    opts || (opts = {})
+    const query = utils.isUndefined(opts.query) ? self.knex : opts.query
+    const table = self.getTable(mapper)
+
+    return query.select(`${table}.*`).from(table)
   }
-}
+})
 
-module.exports = DSSqlAdapter
+/**
+ * Details of the current version of the `js-data-sql` module.
+ *
+ * @name module:js-data-sql.version
+ * @type {Object}
+ * @property {string} version.full The full semver value.
+ * @property {number} version.major The major version number.
+ * @property {number} version.minor The minor version number.
+ * @property {number} version.patch The patch version number.
+ * @property {(string|boolean)} version.alpha The alpha version value,
+ * otherwise `false` if the current version is not alpha.
+ * @property {(string|boolean)} version.beta The beta version value,
+ * otherwise `false` if the current version is not beta.
+ */
+export const version = '<%= version %>'
+
+/**
+ * Registered as `js-data-sql` in NPM.
+ *
+ * @example <caption>CommonJS</caption>
+ * var SqlAdapter = require('js-data-sql').SqlAdapter
+ * var adapter = new SqlAdapter()
+ *
+ * @example <caption>ES2015 Modules</caption>
+ * import {SqlAdapter} from 'js-data-sql'
+ * const adapter = new SqlAdapter()
+ *
+ * @module js-data-sql
+ */
+
+export default SqlAdapter

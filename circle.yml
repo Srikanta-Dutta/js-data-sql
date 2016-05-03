@@ -1,11 +1,14 @@
 machine:
   node:
     version: 4.1.0
-
 database:
   override:
     - DB_CLIENT=mysql npm run migrate-db
     - DB_CLIENT=pg npm run migrate-db
+dependencies:
+  pre:
+    - npm install -g npm
+    - npm install js-data@^3.0.0-beta.3 pg mysql knex
 test:
   override:
     - npm run ci

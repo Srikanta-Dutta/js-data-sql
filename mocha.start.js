@@ -1,61 +1,67 @@
 /*global assert:true */
-'use strict';
+'use strict'
 
-var JSData = require('js-data');
-var TestRunner = require('js-data-adapter-tests');
+// prepare environment for js-data-adapter-tests
+require('babel-polyfill')
 
-var mocha = require('mocha');
-var coMocha = require('co-mocha');
+var JSData = require('js-data')
+var JSDataAdapterTests = require('js-data-adapter-tests')
+var JSDataSql = require('./')
 
-coMocha(mocha);
-JSData.DSUtils.Promise = require('bluebird');
+var assert = global.assert = JSDataAdapterTests.assert
+global.sinon = JSDataAdapterTests.sinon
 
-var DSSqlAdapter = require('./');
+var DB_CLIENT = process.env.DB_CLIENT || 'mysql'
 
-var globals = module.exports = {
-  TestRunner: TestRunner,
-  assert: TestRunner.assert,
-  co: require('co')
-};
+var connection
 
-var test = new mocha();
-
-var testGlobals = [];
-
-for (var key in globals) {
-  global[key] = globals[key];
-  testGlobals.push(globals[key]);
-}
-test.globals(testGlobals);
-
-var config = {
-  client: process.env.DB_CLIENT || 'mysql',
-  connection: {
+if (DB_CLIENT === 'sqlite3') {
+  connection = {
+    filename: process.env.DB_FILE
+  }
+} else {
+  connection = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || process.env.C9_USER || 'ubuntu',
     database: process.env.DB_NAME || (process.env.C9_USER ? 'c9' : 'circle_test')
-  },
-  pool: {
-    min: 0,
-    max: 10
-  },
-  debug: process.env.DEBUG || false
-};
+  }
+}
 
-TestRunner.init({
-  DS: JSData.DS,
-  Adapter: DSSqlAdapter,
-  adapterConfig: config
-});
+JSDataAdapterTests.init({
+  debug: false,
+  JSData: JSData,
+  Adapter: JSDataSql.SqlAdapter,
+  adapterConfig: {
+    knexOptions: {
+      client: DB_CLIENT,
+      connection: connection,
+      pool: {
+        min: 0,
+        max: 10
+      },
+      debug: !!process.env.DEBUG
+    },
+    debug: !!process.env.DEBUG
+  },
+  // js-data-sql does NOT support these features
+  xfeatures: [
+    'findHasManyLocalKeys',
+    'findHasManyForeignKeys',
+    'filterOnRelations'
+  ]
+})
 
-beforeEach(function () {
-  globals.DSUtils = global.DSUtils = this.$$DSUtils;
-  globals.DSErrors = global.DSErrors = this.$$DSErrors;
-  globals.adapter = global.adapter = this.$$adapter;
-  globals.store = global.store = this.$$store;
-  globals.User = global.User = this.$$User;
-  globals.Profile = global.Profile = this.$$Profile;
-  globals.Address = global.Address = this.$$Address;
-  globals.Post = global.Post = this.$$Post;
-  globals.Comment = global.Comment = this.$$Comment;
-});
+describe('exports', function () {
+  it('should have correct exports', function () {
+    assert(JSDataSql.default)
+    assert(JSDataSql.SqlAdapter)
+    assert(JSDataSql.SqlAdapter === JSDataSql.default)
+    assert(JSDataSql.version)
+    assert(JSDataSql.version.full)
+  })
+})
+
+require('./test/create_trx.spec')
+require('./test/destroy_trx.spec')
+require('./test/filterQuery.spec')
+require('./test/update_trx.spec')

@@ -1,18 +1,22 @@
 {
   "name": "js-data-sql",
   "description": "Postgres/MySQL/MariaDB/SQLite3 adapter for js-data.",
-  "version": "0.11.17",
-  "homepage": "http://www.js-data.io/docs/dssqladapter",
+  "version": "1.0.0-beta.1",
+  "homepage": "https://github.com/js-data/js-data-sql",
   "repository": {
     "type": "git",
     "url": "https://github.com/js-data/js-data-sql.git"
   },
-  "author": {
-    "name": "Jason Dobry",
-    "email": "jason.dobry@gmail.com"
-  },
+  "author": "js-data-sql project authors",
   "license": "MIT",
   "main": "./dist/js-data-sql.js",
+  "typings": "./dist/js-data-sql.d.ts",
+  "files": [
+    "dist/",
+    "src/",
+    "AUTHORS",
+    "CONTRIBUTORS"
+  ],
   "keywords": [
     "data",
     "datastore",
@@ -25,45 +29,59 @@
     "mariadb",
     "sqlite"
   ],
+  "standard": {
+    "parser": "babel-eslint",
+    "globals": [
+      "describe",
+      "it",
+      "sinon",
+      "assert",
+      "before",
+      "after",
+      "beforeEach",
+      "afterEach"
+    ],
+    "ignore": ["dist/", "test/"]
+  },
+  "babel": {
+    "presets": ["es2015-rollup"]
+  },
   "scripts": {
-    "lint": "standard src/index.js",
-    "build": "webpack --config webpack.config.js --progress --colors",
-    "mocha-mysql": "DB_CLIENT=mysql DB_USER=root mocha --timeout 20000 --reporter dot mocha.start.js test/*.spec.js",
-    "mocha-pg": "DB_CLIENT=pg mocha --timeout 20000 --reporter dot mocha.start.js test/*.spec.js",
+    "lint": "repo-tools lint \"**/*.js\"",
+    "bundle": "rollup -c rollup.config.js -f cjs -o dist/js-data-sql.js -m dist/js-data-sql.js.map src/index.js && repo-tools write-version dist/js-data-sql.js",
+    "doc": "jsdoc -c conf.json src node_modules/js-data-adapter/src",
+    "watch": "watch \"npm run bundle\" src/",
+    "build": "npm run lint && npm run bundle",
+    "mocha-sqlite3": "DB_CLIENT=sqlite3 DB_FILE=\"./test.db\" mocha -t 30000 -R dot -r source-map-support/register mocha.start.js",
+    "mocha-mysql": "DB_CLIENT=mysql DB_USER=root mocha -t 30000 -R dot -r source-map-support/register mocha.start.js",
+    "mocha-pg": "DB_CLIENT=pg mocha -t 30000 -R dot -r source-map-support/register mocha.start.js",
     "mocha-all": "npm run mocha-mysql && npm run mocha-pg",
-    "cover": "istanbul cover --hook-run-in-context node_modules/mocha/bin/_mocha -- --timeout 20000 --reporter dot mocha.start.js test/*.spec.js",
+    "cover": "DB_CLIENT=mysql DB_USER=root istanbul cover --hook-run-in-context node_modules/mocha/bin/_mocha -- -t 30000 -R dot -r source-map-support/register mocha.start.js",
     "test": "npm run lint && npm run build && npm run cover",
-    "ci": "npm run test && cat coverage/lcov.info | coveralls || true && cat ./coverage/lcov.info | codacy-coverage || true",
-    
+    "release": "npm test && npm run doc && repo-tools updates && repo-tools changelog && repo-tools authors",
+    "ci": "npm run test && cat coverage/lcov.info | codecov",
+
     "create-migration": "knex --cwd=test migrate:make",
     "migrate-db": "knex --cwd=test migrate:latest",
     "rollback-db": "knex --cwd=test migrate:rollback"
   },
-  "standard": {
-    "parser": "babel-eslint"
-  },
   "dependencies": {
-    "mout": "0.11.1"
+    "js-data-adapter": "~0.6.1",
+    "mout": "1.0.0"
   },
   "peerDependencies": {
-    "js-data": "~2.x",
+    "js-data": "^3.0.0-beta.3",
     "knex": ">=0.7.4"
   },
   "devDependencies": {
-    "babel-core": "6.1.4",
-    "babel-eslint": "4.1.5",
-    "babel-loader": "6.1.0",
-    "babel-preset-es2015": "6.1.2",
-    "bluebird": "2.10.2",
-    "chai": "3.4.1",
-    "co": "4.6.0",
-    "co-mocha": "1.1.2",
-    "codacy-coverage": "1.1.3",
-    "coveralls": "2.11.4",
-    "istanbul": "0.4.0",
-    "js-data-adapter-tests": "~1.x",
-    "mocha": "2.3.3",
-    "standard": "5.3.1",
-    "webpack": "1.12.2"
+    "babel-polyfill": "6.8.0",
+    "babel-preset-es2015-rollup": "1.1.1",
+    "istanbul": "0.4.3",
+    "js-data-adapter-tests": "^2.0.0-alpha.20",
+    "js-data-repo-tools": "0.5.0",
+    "rollup": "0.26.1",
+    "rollup-plugin-babel": "2.4.0",
+    "source-map-support": "0.4.0",
+    "watch": "0.18.0"
   }
 }
