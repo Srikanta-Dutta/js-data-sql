@@ -66,11 +66,11 @@
     "rollback-db": "knex --cwd=test migrate:rollback"
   },
   "dependencies": {
-    "js-data-adapter": "~0.6.1",
+    "js-data-adapter": "~0.6.2",
     "mout": "1.0.0"
   },
   "peerDependencies": {
-    "js-data": "^3.0.0-beta.3",
+    "js-data": "^3.0.0-beta.5",
     "knex": ">=0.7.4"
   },
   "devDependencies": {
@@ -78,8 +78,8 @@
     "babel-preset-es2015-rollup": "1.1.1",
     "istanbul": "0.4.3",
     "js-data-adapter-tests": "^2.0.0-alpha.20",
-    "js-data-repo-tools": "0.5.0",
-    "rollup": "0.26.1",
+    "js-data-repo-tools": "0.5.1",
+    "rollup": "0.26.3",
     "rollup-plugin-babel": "2.4.0",
     "source-map-support": "0.4.0",
     "watch": "0.18.0"

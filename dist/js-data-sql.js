@@ -202,24 +202,22 @@ Object.freeze(OPERATORS);
  * @extends Adapter
  * @param {Object} [opts] Configuration options.
  * @param {boolean} [opts.debug=false] See {@link Adapter#debug}.
+ * @param {Object} [opts.knexOptions] See {@link SqlAdapter#knexOptions}.
  * @param {Object} [opts.operators] See {@link SqlAdapter#operators}.
  * @param {boolean} [opts.raw=false] See {@link Adapter#raw}.
  */
 function SqlAdapter(opts) {
-  var self = this;
-  jsData.utils.classCallCheck(self, SqlAdapter);
+  jsData.utils.classCallCheck(this, SqlAdapter);
   opts || (opts = {});
   opts.knexOptions || (opts.knexOptions = {});
   jsData.utils.fillIn(opts, DEFAULTS);
 
-  Object.defineProperty(self, 'knex', {
+  Object.defineProperty(this, 'knex', {
     writable: true,
     value: undefined
   });
 
-  jsDataAdapter.Adapter.call(self, opts);
-
-  self.knex || (self.knex = knex(self.knexOptions));
+  jsDataAdapter.Adapter.call(this, opts);
 
   /**
    * Override the default predicate functions for specified operators.
@@ -228,9 +226,17 @@ function SqlAdapter(opts) {
    * @type {Object}
    * @default {}
    */
-  self.operators || (self.operators = {});
+  this.knex || (this.knex = knex(this.knexOptions));
 
-  jsData.utils.fillIn(self.operators, OPERATORS);
+  /**
+   * Override the default predicate functions for specified operators.
+   *
+   * @name SqlAdapter#operators
+   * @type {Object}
+   * @default {}
+   */
+  this.operators || (this.operators = {});
+  jsData.utils.fillIn(this.operators, OPERATORS);
 }
 
 // Setup prototype inheritance from Adapter
@@ -472,69 +478,68 @@ function loadWithRelations (items, resourceConfig, options) {
 
 jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
   _count: function _count(mapper, query, opts) {
-    var self = this;
     opts || (opts = {});
     query || (query = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
-    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts).count('* as count').then(function (rows) {
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
+    return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts).count('* as count').then(function (rows) {
       return [rows[0].count, {}];
     });
   },
   _create: function _create(mapper, props, opts) {
-    var self = this;
+    var _this = this;
+
     var idAttribute = mapper.idAttribute;
     props || (props = {});
     opts || (opts = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
     return sqlBuilder(getTable(mapper)).insert(props, idAttribute).then(function (ids) {
       var id = jsData.utils.isUndefined(props[idAttribute]) ? ids.length ? ids[0] : undefined : props[idAttribute];
       if (jsData.utils.isUndefined(id)) {
         throw new Error('Failed to create!');
       }
-      return self._find(mapper, id, opts).then(function (result) {
+      return _this._find(mapper, id, opts).then(function (result) {
         return [result[0], { ids: ids }];
       });
     });
   },
   _createMany: function _createMany(mapper, props, opts) {
-    var self = this;
+    var _this2 = this;
+
     props || (props = {});
     opts || (opts = {});
 
-    return Promise.all(props.map(function (record) {
-      return self._create(mapper, record, opts);
-    })).then(function (results) {
+    var tasks = props.map(function (record) {
+      return _this2._create(mapper, record, opts);
+    });
+    return Promise.all(tasks).then(function (results) {
       return [results.map(function (result) {
         return result[0];
       }), {}];
     });
   },
   _destroy: function _destroy(mapper, id, opts) {
-    var self = this;
     opts || (opts = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
     return sqlBuilder(getTable(mapper)).where(mapper.idAttribute, toString(id)).del().then(function () {
       return [undefined, {}];
     });
   },
   _destroyAll: function _destroyAll(mapper, query, opts) {
-    var self = this;
     query || (query = {});
     opts || (opts = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
-    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts).del().then(function () {
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
+    return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts).del().then(function () {
       return [undefined, {}];
     });
   },
   _find: function _find(mapper, id, opts) {
-    var self = this;
     opts || (opts = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
     var table = getTable(mapper);
     return sqlBuilder.select(table + '.*').from(table).where(table + '.' + mapper.idAttribute, toString(id)).then(function (rows) {
       if (!rows || !rows.length) {
@@ -544,35 +549,34 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     });
   },
   _findAll: function _findAll(mapper, query, opts) {
-    var self = this;
     query || (query = {});
     opts || (opts = {});
 
-    return self.filterQuery(self.selectTable(mapper, opts), query, opts).then(function (rows) {
+    return this.filterQuery(this.selectTable(mapper, opts), query, opts).then(function (rows) {
       return [rows || [], {}];
     });
   },
   _sum: function _sum(mapper, field, query, opts) {
-    var self = this;
     if (!jsData.utils.isString(field)) {
       throw new Error('field must be a string!');
     }
     opts || (opts = {});
     query || (query = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
-    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts).sum(field + ' as sum').then(function (rows) {
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
+    return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts).sum(field + ' as sum').then(function (rows) {
       return [rows[0].sum || 0, {}];
     });
   },
   _update: function _update(mapper, id, props, opts) {
-    var self = this;
+    var _this3 = this;
+
     props || (props = {});
     opts || (opts = {});
 
-    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
+    var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? this.knex : opts.transaction;
     return sqlBuilder(getTable(mapper)).where(mapper.idAttribute, toString(id)).update(props).then(function () {
-      return self._find(mapper, id, opts);
+      return _this3._find(mapper, id, opts);
     }).then(function (result) {
       if (!result[0]) {
         throw new Error('Not Found');
@@ -581,7 +585,8 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     });
   },
   _updateAll: function _updateAll(mapper, props, query, opts) {
-    var self = this;
+    var _this4 = this;
+
     var idAttribute = mapper.idAttribute;
     props || (props = {});
     query || (query = {});
@@ -589,35 +594,37 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
 
     var ids = void 0;
 
-    return self._findAll(mapper, query, opts).then(function (result) {
+    return this._findAll(mapper, query, opts).then(function (result) {
       var records = result[0];
       ids = records.map(function (record) {
         return record[idAttribute];
       });
-      var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? self.knex : opts.transaction;
-      return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts).update(props);
+      var sqlBuilder = jsData.utils.isUndefined(opts.transaction) ? _this4.knex : opts.transaction;
+      return _this4.filterQuery(sqlBuilder(getTable(mapper)), query, opts).update(props);
     }).then(function () {
       var _query = { where: {} };
       _query.where[idAttribute] = { 'in': ids };
-      return self._findAll(mapper, _query, opts);
+      return _this4._findAll(mapper, _query, opts);
     });
   },
   _updateMany: function _updateMany(mapper, records, opts) {
-    var self = this;
+    var _this5 = this;
+
     var idAttribute = mapper.idAttribute;
     records || (records = []);
     opts || (opts = {});
 
-    return Promise.all(records.map(function (record) {
-      return self._update(mapper, record[idAttribute], record, opts);
-    })).then(function (results) {
+    var tasks = records.map(function (record) {
+      return _this5._update(mapper, record[idAttribute], record, opts);
+    });
+    return Promise.all(tasks).then(function (results) {
       return [results.map(function (result) {
         return result[0];
       }), {}];
     });
   },
   filterQuery: function filterQuery(sqlBuilder, query, opts) {
-    var self = this;
+    var _this6 = this;
 
     query = jsData.utils.plainCopy(query || {});
     opts || (opts = {});
@@ -655,7 +662,7 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
             operator = operator.substr(1);
             isOr = true;
           }
-          var predicateFn = self.getOperator(operator, opts);
+          var predicateFn = _this6.getOperator(operator, opts);
           if (predicateFn) {
             sqlBuilder = predicateFn(sqlBuilder, field, value, isOr);
           } else {
@@ -726,11 +733,9 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     return mapper.table || underscore(mapper.name);
   },
   selectTable: function selectTable(mapper, opts) {
-    var self = this;
     opts || (opts = {});
-    var query = jsData.utils.isUndefined(opts.query) ? self.knex : opts.query;
-    var table = self.getTable(mapper);
-
+    var query = jsData.utils.isUndefined(opts.query) ? this.knex : opts.query;
+    var table = this.getTable(mapper);
     return query.select(table + '.*').from(table);
   }
 });
@@ -757,8 +762,36 @@ var version = {
   patch: 0
 };
 
+/**
+ * Registered as `js-data-sql` in NPM.
+ *
+ * @example <caption>CommonJS</caption>
+ * var SqlAdapter = require('js-data-sql').SqlAdapter
+ * var adapter = new SqlAdapter()
+ *
+ * @example <caption>ES2015 Modules</caption>
+ * import {SqlAdapter} from 'js-data-sql'
+ * const adapter = new SqlAdapter()
+ *
+ * @module js-data-sql
+ */
+
+/**
+ * {@link SqlAdapter} class.
+ *
+ * @example <caption>CommonJS</caption>
+ * var SqlAdapter = require('js-data-sql').SqlAdapter
+ * var adapter = new SqlAdapter()
+ *
+ * @example <caption>ES2015 Modules</caption>
+ * import {SqlAdapter} from 'js-data-sql'
+ * const adapter = new SqlAdapter()
+ *
+ * @name module:js-data-sql.SqlAdapter
+ * @see SqlAdapter
+ */
+
 exports.OPERATORS = OPERATORS;
 exports.SqlAdapter = SqlAdapter;
 exports.version = version;
-exports['default'] = SqlAdapter;
 //# sourceMappingURL=js-data-sql.js.map

@@ -160,24 +160,22 @@ Object.freeze(OPERATORS)
  * @extends Adapter
  * @param {Object} [opts] Configuration options.
  * @param {boolean} [opts.debug=false] See {@link Adapter#debug}.
+ * @param {Object} [opts.knexOptions] See {@link SqlAdapter#knexOptions}.
  * @param {Object} [opts.operators] See {@link SqlAdapter#operators}.
  * @param {boolean} [opts.raw=false] See {@link Adapter#raw}.
  */
 export function SqlAdapter (opts) {
-  const self = this
-  utils.classCallCheck(self, SqlAdapter)
+  utils.classCallCheck(this, SqlAdapter)
   opts || (opts = {})
   opts.knexOptions || (opts.knexOptions = {})
   utils.fillIn(opts, DEFAULTS)
 
-  Object.defineProperty(self, 'knex', {
+  Object.defineProperty(this, 'knex', {
     writable: true,
     value: undefined
   })
 
-  Adapter.call(self, opts)
-
-  self.knex || (self.knex = knex(self.knexOptions))
+  Adapter.call(this, opts)
 
   /**
    * Override the default predicate functions for specified operators.
@@ -186,9 +184,17 @@ export function SqlAdapter (opts) {
    * @type {Object}
    * @default {}
    */
-  self.operators || (self.operators = {})
+  this.knex || (this.knex = knex(this.knexOptions))
 
-  utils.fillIn(self.operators, OPERATORS)
+  /**
+   * Override the default predicate functions for specified operators.
+   *
+   * @name SqlAdapter#operators
+   * @type {Object}
+   * @default {}
+   */
+  this.operators || (this.operators = {})
+  utils.fillIn(this.operators, OPERATORS)
 }
 
 // Setup prototype inheritance from Adapter
@@ -430,89 +436,70 @@ function loadWithRelations (items, resourceConfig, options) {
 
 utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
   _count (mapper, query, opts) {
-    const self = this
     opts || (opts = {})
     query || (query = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
-    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
+    return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
       .count('* as count')
-      .then(function (rows) {
-        return [rows[0].count, {}]
-      })
+      .then((rows) => [rows[0].count, {}])
   },
 
   _create (mapper, props, opts) {
-    const self = this
     const idAttribute = mapper.idAttribute
     props || (props = {})
     opts || (opts = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
     return sqlBuilder(getTable(mapper))
       .insert(props, idAttribute)
-      .then(function (ids) {
+      .then((ids) => {
         const id = utils.isUndefined(props[idAttribute]) ? (ids.length ? ids[0] : undefined) : props[idAttribute]
         if (utils.isUndefined(id)) {
           throw new Error('Failed to create!')
         }
-        return self._find(mapper, id, opts).then(function (result) {
-          return [result[0], { ids }]
-        })
+        return this._find(mapper, id, opts).then((result) => [result[0], { ids }])
       })
   },
 
   _createMany (mapper, props, opts) {
-    const self = this
     props || (props = {})
     opts || (opts = {})
 
-    return Promise.all(props.map(function (record) {
-      return self._create(mapper, record, opts)
-    })).then(function (results) {
-      return [results.map(function (result) {
-        return result[0]
-      }), {}]
-    })
+    const tasks = props.map((record) => this._create(mapper, record, opts))
+    return Promise.all(tasks).then((results) => [results.map((result) => result[0]), {}])
   },
 
   _destroy (mapper, id, opts) {
-    const self = this
     opts || (opts = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
     return sqlBuilder(getTable(mapper))
       .where(mapper.idAttribute, toString(id))
       .del()
-      .then(function () {
-        return [undefined, {}]
-      })
+      .then(() => [undefined, {}])
   },
 
   _destroyAll (mapper, query, opts) {
-    const self = this
     query || (query = {})
     opts || (opts = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
-    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
+    return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
       .del()
-      .then(function () {
-        return [undefined, {}]
-      })
+      .then(() => [undefined, {}])
   },
 
   _find (mapper, id, opts) {
-    const self = this
     opts || (opts = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
     const table = getTable(mapper)
     return sqlBuilder
       .select(`${table}.*`)
       .from(table)
       .where(`${table}.${mapper.idAttribute}`, toString(id))
-      .then(function (rows) {
+      .then((rows) => {
         if (!rows || !rows.length) {
           return [undefined, {}]
         }
@@ -521,44 +508,35 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
   },
 
   _findAll (mapper, query, opts) {
-    const self = this
     query || (query = {})
     opts || (opts = {})
 
-    return self.filterQuery(self.selectTable(mapper, opts), query, opts).then(function (rows) {
-      return [rows || [], {}]
-    })
+    return this.filterQuery(this.selectTable(mapper, opts), query, opts).then((rows) => [rows || [], {}])
   },
 
   _sum (mapper, field, query, opts) {
-    const self = this
     if (!utils.isString(field)) {
       throw new Error('field must be a string!')
     }
     opts || (opts = {})
     query || (query = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
-    return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
+    return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts)
       .sum(`${field} as sum`)
-      .then(function (rows) {
-        return [rows[0].sum || 0, {}]
-      })
+      .then((rows) => [rows[0].sum || 0, {}])
   },
 
   _update (mapper, id, props, opts) {
-    const self = this
     props || (props = {})
     opts || (opts = {})
 
-    const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
+    const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
     return sqlBuilder(getTable(mapper))
       .where(mapper.idAttribute, toString(id))
       .update(props)
-      .then(function () {
-        return self._find(mapper, id, opts)
-      })
-      .then(function (result) {
+      .then(() => this._find(mapper, id, opts))
+      .then((result) => {
         if (!result[0]) {
           throw new Error('Not Found')
         }
@@ -567,7 +545,6 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
   },
 
   _updateAll (mapper, props, query, opts) {
-    const self = this
     const idAttribute = mapper.idAttribute
     props || (props = {})
     query || (query = {})
@@ -575,38 +552,28 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
 
     let ids
 
-    return self._findAll(mapper, query, opts).then(function (result) {
+    return this._findAll(mapper, query, opts).then((result) => {
       const records = result[0]
-      ids = records.map(function (record) {
-        return record[idAttribute]
-      })
-      const sqlBuilder = utils.isUndefined(opts.transaction) ? self.knex : opts.transaction
-      return self.filterQuery(sqlBuilder(getTable(mapper)), query, opts).update(props)
-    }).then(function () {
+      ids = records.map((record) => record[idAttribute])
+      const sqlBuilder = utils.isUndefined(opts.transaction) ? this.knex : opts.transaction
+      return this.filterQuery(sqlBuilder(getTable(mapper)), query, opts).update(props)
+    }).then(() => {
       const _query = { where: {} }
       _query.where[idAttribute] = { 'in': ids }
-      return self._findAll(mapper, _query, opts)
+      return this._findAll(mapper, _query, opts)
     })
   },
 
   _updateMany (mapper, records, opts) {
-    const self = this
     const idAttribute = mapper.idAttribute
     records || (records = [])
     opts || (opts = {})
 
-    return Promise.all(records.map(function (record) {
-      return self._update(mapper, record[idAttribute], record, opts)
-    })).then(function (results) {
-      return [results.map(function (result) {
-        return result[0]
-      }), {}]
-    })
+    const tasks = records.map((record) => this._update(mapper, record[idAttribute], record, opts))
+    return Promise.all(tasks).then((results) => [results.map((result) => result[0]), {}])
   },
 
   filterQuery (sqlBuilder, query, opts) {
-    const self = this
-
     query = utils.plainCopy(query || {})
     opts || (opts = {})
     opts.operators || (opts.operators = {})
@@ -616,7 +583,7 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     query.skip || (query.skip = query.offset)
 
     // Transform non-keyword properties to "where" clause configuration
-    utils.forOwn(query, function (config, keyword) {
+    utils.forOwn(query, (config, keyword) => {
       if (reserved.indexOf(keyword) === -1) {
         if (utils.isObject(config)) {
           query.where[keyword] = config
@@ -632,18 +599,18 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     // Filter
     if (Object.keys(query.where).length !== 0) {
       // Apply filter for each field
-      utils.forOwn(query.where, function (criteria, field) {
+      utils.forOwn(query.where, (criteria, field) => {
         if (!utils.isObject(criteria)) {
           criteria = { '==': criteria }
         }
         // Apply filter for each operator
-        utils.forOwn(criteria, function (value, operator) {
+        utils.forOwn(criteria, (value, operator) => {
           let isOr = false
           if (operator && operator[0] === '|') {
             operator = operator.substr(1)
             isOr = true
           }
-          let predicateFn = self.getOperator(operator, opts)
+          let predicateFn = this.getOperator(operator, opts)
           if (predicateFn) {
             sqlBuilder = predicateFn(sqlBuilder, field, value, isOr)
           } else {
@@ -717,11 +684,9 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
   },
 
   selectTable (mapper, opts) {
-    const self = this
     opts || (opts = {})
-    const query = utils.isUndefined(opts.query) ? self.knex : opts.query
-    const table = self.getTable(mapper)
-
+    const query = utils.isUndefined(opts.query) ? this.knex : opts.query
+    const table = this.getTable(mapper)
     return query.select(`${table}.*`).from(table)
   }
 })
@@ -756,4 +721,17 @@ export const version = '<%= version %>'
  * @module js-data-sql
  */
 
-export default SqlAdapter
+/**
+ * {@link SqlAdapter} class.
+ *
+ * @example <caption>CommonJS</caption>
+ * var SqlAdapter = require('js-data-sql').SqlAdapter
+ * var adapter = new SqlAdapter()
+ *
+ * @example <caption>ES2015 Modules</caption>
+ * import {SqlAdapter} from 'js-data-sql'
+ * const adapter = new SqlAdapter()
+ *
+ * @name module:js-data-sql.SqlAdapter
+ * @see SqlAdapter
+ */

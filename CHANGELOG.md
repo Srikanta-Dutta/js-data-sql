@@ -1,4 +1,4 @@
-##### 1.0.0-beta.1 - xx May 2016
+##### 1.0.0-beta.1 - 14 May 2016
 
 Official v1 beta release
 

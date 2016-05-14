@@ -53,9 +53,9 @@ JSDataAdapterTests.init({
 
 describe('exports', function () {
   it('should have correct exports', function () {
-    assert(JSDataSql.default)
     assert(JSDataSql.SqlAdapter)
-    assert(JSDataSql.SqlAdapter === JSDataSql.default)
+    assert(JSDataSql.OPERATORS)
+    assert(JSDataSql.OPERATORS['=='])
     assert(JSDataSql.version)
     assert(JSDataSql.version.full)
   })
