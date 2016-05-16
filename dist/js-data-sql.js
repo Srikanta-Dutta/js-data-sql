@@ -100,6 +100,7 @@ var KILOMETERS_REGEXP = /(\d+(\.\d+)?)\s*(k|K)$/;
  * contain the provided value. Not supported.
  */
 var OPERATORS = {
+  '=': equal,
   '==': equal,
   '===': equal,
   '!=': notEqual,
@@ -202,14 +203,14 @@ Object.freeze(OPERATORS);
  * @extends Adapter
  * @param {Object} [opts] Configuration options.
  * @param {boolean} [opts.debug=false] See {@link Adapter#debug}.
- * @param {Object} [opts.knexOptions] See {@link SqlAdapter#knexOptions}.
+ * @param {Object} [opts.knexOpts] See {@link SqlAdapter#knexOpts}.
  * @param {Object} [opts.operators] See {@link SqlAdapter#operators}.
  * @param {boolean} [opts.raw=false] See {@link Adapter#raw}.
  */
 function SqlAdapter(opts) {
   jsData.utils.classCallCheck(this, SqlAdapter);
   opts || (opts = {});
-  opts.knexOptions || (opts.knexOptions = {});
+  opts.knexOpts || (opts.knexOpts = {});
   jsData.utils.fillIn(opts, DEFAULTS);
 
   Object.defineProperty(this, 'knex', {
@@ -226,7 +227,7 @@ function SqlAdapter(opts) {
    * @type {Object}
    * @default {}
    */
-  this.knex || (this.knex = knex(this.knexOptions));
+  this.knex || (this.knex = knex(this.knexOpts));
 
   /**
    * Override the default predicate functions for specified operators.
@@ -623,9 +624,57 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
       }), {}];
     });
   },
-  filterQuery: function filterQuery(sqlBuilder, query, opts) {
+  applyWhereFromObject: function applyWhereFromObject(sqlBuilder, where, opts) {
     var _this6 = this;
 
+    jsData.utils.forOwn(where, function (criteria, field) {
+      if (!jsData.utils.isObject(criteria)) {
+        criteria = { '==': criteria };
+      }
+      // Apply filter for each operator
+      jsData.utils.forOwn(criteria, function (value, operator) {
+        var isOr = false;
+        if (operator && operator[0] === '|') {
+          operator = operator.substr(1);
+          isOr = true;
+        }
+        var predicateFn = _this6.getOperator(operator, opts);
+        if (predicateFn) {
+          sqlBuilder = predicateFn(sqlBuilder, field, value, isOr);
+        } else {
+          throw new Error('Operator ' + operator + ' not supported!');
+        }
+      });
+    });
+  },
+  applyWhereFromArray: function applyWhereFromArray(sqlBuilder, where, opts) {
+    var _this7 = this;
+
+    where.forEach(function (_where, i) {
+      if (_where === 'and' || _where === 'or') {
+        return;
+      }
+      var self = _this7;
+      var prev = where[i - 1];
+      var parser = jsData.utils.isArray(_where) ? _this7.applyWhereFromArray : _this7.applyWhereFromObject;
+      if (prev) {
+        if (prev === 'or') {
+          sqlBuilder = sqlBuilder.orWhere(function () {
+            parser.call(self, this, _where, opts);
+          });
+        } else {
+          sqlBuilder = sqlBuilder.andWhere(function () {
+            parser.call(self, this, _where, opts);
+          });
+        }
+      } else {
+        sqlBuilder = sqlBuilder.where(function () {
+          parser.call(self, this, _where, opts);
+        });
+      }
+    });
+  },
+  filterQuery: function filterQuery(sqlBuilder, query, opts) {
     query = jsData.utils.plainCopy(query || {});
     opts || (opts = {});
     opts.operators || (opts.operators = {});
@@ -649,27 +698,11 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     });
 
     // Filter
-    if (Object.keys(query.where).length !== 0) {
+    if (jsData.utils.isObject(query.where) && Object.keys(query.where).length !== 0) {
       // Apply filter for each field
-      jsData.utils.forOwn(query.where, function (criteria, field) {
-        if (!jsData.utils.isObject(criteria)) {
-          criteria = { '==': criteria };
-        }
-        // Apply filter for each operator
-        jsData.utils.forOwn(criteria, function (value, operator) {
-          var isOr = false;
-          if (operator && operator[0] === '|') {
-            operator = operator.substr(1);
-            isOr = true;
-          }
-          var predicateFn = _this6.getOperator(operator, opts);
-          if (predicateFn) {
-            sqlBuilder = predicateFn(sqlBuilder, field, value, isOr);
-          } else {
-            throw new Error('Operator ' + operator + ' not supported!');
-          }
-        });
-      });
+      this.applyWhereFromObject(sqlBuilder, query.where, opts);
+    } else if (jsData.utils.isArray(query.where)) {
+      this.applyWhereFromArray(sqlBuilder, query.where, opts);
     }
 
     // Sort
@@ -755,8 +788,8 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
  * otherwise `false` if the current version is not beta.
  */
 var version = {
-  beta: 1,
-  full: '1.0.0-beta.1',
+  beta: 2,
+  full: '1.0.0-beta.2',
   major: 1,
   minor: 0,
   patch: 0

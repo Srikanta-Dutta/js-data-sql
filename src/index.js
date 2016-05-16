@@ -57,6 +57,7 @@ const KILOMETERS_REGEXP = /(\d+(\.\d+)?)\s*(k|K)$/
  * contain the provided value. Not supported.
  */
 export const OPERATORS = {
+  '=': equal,
   '==': equal,
   '===': equal,
   '!=': notEqual,
@@ -160,14 +161,14 @@ Object.freeze(OPERATORS)
  * @extends Adapter
  * @param {Object} [opts] Configuration options.
  * @param {boolean} [opts.debug=false] See {@link Adapter#debug}.
- * @param {Object} [opts.knexOptions] See {@link SqlAdapter#knexOptions}.
+ * @param {Object} [opts.knexOpts] See {@link SqlAdapter#knexOpts}.
  * @param {Object} [opts.operators] See {@link SqlAdapter#operators}.
  * @param {boolean} [opts.raw=false] See {@link Adapter#raw}.
  */
 export function SqlAdapter (opts) {
   utils.classCallCheck(this, SqlAdapter)
   opts || (opts = {})
-  opts.knexOptions || (opts.knexOptions = {})
+  opts.knexOpts || (opts.knexOpts = {})
   utils.fillIn(opts, DEFAULTS)
 
   Object.defineProperty(this, 'knex', {
@@ -184,7 +185,7 @@ export function SqlAdapter (opts) {
    * @type {Object}
    * @default {}
    */
-  this.knex || (this.knex = knex(this.knexOptions))
+  this.knex || (this.knex = knex(this.knexOpts))
 
   /**
    * Override the default predicate functions for specified operators.
@@ -573,6 +574,54 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     return Promise.all(tasks).then((results) => [results.map((result) => result[0]), {}])
   },
 
+  applyWhereFromObject (sqlBuilder, where, opts) {
+    utils.forOwn(where, (criteria, field) => {
+      if (!utils.isObject(criteria)) {
+        criteria = { '==': criteria }
+      }
+      // Apply filter for each operator
+      utils.forOwn(criteria, (value, operator) => {
+        let isOr = false
+        if (operator && operator[0] === '|') {
+          operator = operator.substr(1)
+          isOr = true
+        }
+        let predicateFn = this.getOperator(operator, opts)
+        if (predicateFn) {
+          sqlBuilder = predicateFn(sqlBuilder, field, value, isOr)
+        } else {
+          throw new Error(`Operator ${operator} not supported!`)
+        }
+      })
+    })
+  },
+
+  applyWhereFromArray (sqlBuilder, where, opts) {
+    where.forEach((_where, i) => {
+      if (_where === 'and' || _where === 'or') {
+        return
+      }
+      const self = this
+      const prev = where[i - 1]
+      const parser = utils.isArray(_where) ? this.applyWhereFromArray : this.applyWhereFromObject
+      if (prev) {
+        if (prev === 'or') {
+          sqlBuilder = sqlBuilder.orWhere(function () {
+            parser.call(self, this, _where, opts)
+          })
+        } else {
+          sqlBuilder = sqlBuilder.andWhere(function () {
+            parser.call(self, this, _where, opts)
+          })
+        }
+      } else {
+        sqlBuilder = sqlBuilder.where(function () {
+          parser.call(self, this, _where, opts)
+        })
+      }
+    })
+  },
+
   filterQuery (sqlBuilder, query, opts) {
     query = utils.plainCopy(query || {})
     opts || (opts = {})
@@ -597,27 +646,11 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     })
 
     // Filter
-    if (Object.keys(query.where).length !== 0) {
+    if (utils.isObject(query.where) && Object.keys(query.where).length !== 0) {
       // Apply filter for each field
-      utils.forOwn(query.where, (criteria, field) => {
-        if (!utils.isObject(criteria)) {
-          criteria = { '==': criteria }
-        }
-        // Apply filter for each operator
-        utils.forOwn(criteria, (value, operator) => {
-          let isOr = false
-          if (operator && operator[0] === '|') {
-            operator = operator.substr(1)
-            isOr = true
-          }
-          let predicateFn = this.getOperator(operator, opts)
-          if (predicateFn) {
-            sqlBuilder = predicateFn(sqlBuilder, field, value, isOr)
-          } else {
-            throw new Error(`Operator ${operator} not supported!`)
-          }
-        })
-      })
+      this.applyWhereFromObject(sqlBuilder, query.where, opts)
+    } else if (utils.isArray(query.where)) {
+      this.applyWhereFromArray(sqlBuilder, query.where, opts)
     }
 
     // Sort

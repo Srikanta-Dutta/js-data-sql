@@ -1,7 +1,7 @@
 {
   "name": "js-data-sql",
   "description": "Postgres/MySQL/MariaDB/SQLite3 adapter for js-data.",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "homepage": "https://github.com/js-data/js-data-sql",
   "repository": {
     "type": "git",
@@ -41,10 +41,15 @@
       "beforeEach",
       "afterEach"
     ],
-    "ignore": ["dist/", "test/"]
+    "ignore": [
+      "dist/",
+      "test/"
+    ]
   },
   "babel": {
-    "presets": ["es2015-rollup"]
+    "presets": [
+      "es2015-rollup"
+    ]
   },
   "scripts": {
     "lint": "repo-tools lint \"**/*.js\"",
@@ -60,7 +65,6 @@
     "test": "npm run lint && npm run build && npm run cover",
     "release": "npm test && npm run doc && repo-tools updates && repo-tools changelog && repo-tools authors",
     "ci": "npm run test && cat coverage/lcov.info | codecov",
-
     "create-migration": "knex --cwd=test migrate:make",
     "migrate-db": "knex --cwd=test migrate:latest",
     "rollback-db": "knex --cwd=test migrate:rollback"

@@ -76,6 +76,106 @@ describe('DSSqlAdapter#filterQuery', function () {
 
     assert.equal(filterQuery.toString(), expectedQuery.toString())
   })
+  it('should apply query from array', function () {
+    var query = {}
+    var sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user`')
+
+    query = {
+      age: 30
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where `age` = 30')
+
+    query = {
+      age: 30,
+      role: 'admin'
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where `age` = 30 and `role` = \'admin\'')
+
+    query = {
+      role: 'admin',
+      age: 30
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where `role` = \'admin\' and `age` = 30')
+
+    query = {
+      role: 'admin',
+      age: 30,
+      skip: 10,
+      limit: 5,
+      orderBy: [
+        ['role', 'desc'],
+        ['age']
+      ]
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where `role` = \'admin\' and `age` = 30 order by `role` desc, `age` asc limit 5 offset 10')
+
+    query = {
+      where: {
+        role: {
+          '=': 'admin'
+        },
+        age: {
+          '=': 30
+        }
+      }
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where `role` = \'admin\' and `age` = 30')
+
+    query = {
+      where: [
+        {
+          role: {
+            '=': 'admin'
+          }
+        },
+        {
+          age: {
+            '=': 30
+          }
+        }
+      ]
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where (`role` = \'admin\') and (`age` = 30)')
+
+    query = {
+      where: [
+        [
+          {
+            role: {
+              '=': 'admin'
+            },
+            age: {
+              '=': 30
+            }
+          },
+          'or',
+          {
+            name: {
+              '=': 'John'
+            }
+          }
+        ],
+        'or',
+        {
+          role: {
+            '=': 'dev'
+          },
+          age: {
+            '=': 22
+          }
+        }
+      ]
+    }
+    sql = adapter.filterQuery(adapter.knex('user'), query).toString()
+    assert.deepEqual(sql, 'select * from `user` where ((`role` = \'admin\' and `age` = 30) or (`name` = \'John\')) or (`role` = \'dev\' and `age` = 22)')
+  })
   describe('Custom/override query operators', function () {
     it('should use custom query operator if provided', function () {
       var query = adapter.knex

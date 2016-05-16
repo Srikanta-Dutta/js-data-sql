@@ -32,7 +32,7 @@ JSDataAdapterTests.init({
   JSData: JSData,
   Adapter: JSDataSql.SqlAdapter,
   adapterConfig: {
-    knexOptions: {
+    knexOpts: {
       client: DB_CLIENT,
       connection: connection,
       pool: {
