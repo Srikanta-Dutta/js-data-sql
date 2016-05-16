@@ -594,6 +594,7 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
         }
       })
     })
+    return sqlBuilder
   },
 
   applyWhereFromArray (sqlBuilder, where, opts) {
@@ -620,6 +621,7 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
         })
       }
     })
+    return sqlBuilder
   },
 
   filterQuery (sqlBuilder, query, opts) {
@@ -648,9 +650,9 @@ utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     // Filter
     if (utils.isObject(query.where) && Object.keys(query.where).length !== 0) {
       // Apply filter for each field
-      this.applyWhereFromObject(sqlBuilder, query.where, opts)
+      sqlBuilder = this.applyWhereFromObject(sqlBuilder, query.where, opts)
     } else if (utils.isArray(query.where)) {
-      this.applyWhereFromArray(sqlBuilder, query.where, opts)
+      sqlBuilder = this.applyWhereFromArray(sqlBuilder, query.where, opts)
     }
 
     // Sort

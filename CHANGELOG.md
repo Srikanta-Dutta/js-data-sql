@@ -1,3 +1,8 @@
+##### 1.0.0-beta.3 - 16 May 2016
+
+###### Bug fixes
+- Small fix for filterQuery
+
 ##### 1.0.0-beta.2 - 16 May 2016
 
 ###### Breaking changes

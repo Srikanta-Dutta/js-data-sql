@@ -646,6 +646,7 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
         }
       });
     });
+    return sqlBuilder;
   },
   applyWhereFromArray: function applyWhereFromArray(sqlBuilder, where, opts) {
     var _this7 = this;
@@ -673,6 +674,7 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
         });
       }
     });
+    return sqlBuilder;
   },
   filterQuery: function filterQuery(sqlBuilder, query, opts) {
     query = jsData.utils.plainCopy(query || {});
@@ -700,9 +702,9 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
     // Filter
     if (jsData.utils.isObject(query.where) && Object.keys(query.where).length !== 0) {
       // Apply filter for each field
-      this.applyWhereFromObject(sqlBuilder, query.where, opts);
+      sqlBuilder = this.applyWhereFromObject(sqlBuilder, query.where, opts);
     } else if (jsData.utils.isArray(query.where)) {
-      this.applyWhereFromArray(sqlBuilder, query.where, opts);
+      sqlBuilder = this.applyWhereFromArray(sqlBuilder, query.where, opts);
     }
 
     // Sort
@@ -788,8 +790,8 @@ jsData.utils.addHiddenPropsToTarget(SqlAdapter.prototype, {
  * otherwise `false` if the current version is not beta.
  */
 var version = {
-  beta: 2,
-  full: '1.0.0-beta.2',
+  beta: 3,
+  full: '1.0.0-beta.3',
   major: 1,
   minor: 0,
   patch: 0
