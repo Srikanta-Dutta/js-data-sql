@@ -27,10 +27,4 @@ var config = {
   debug: !!process.env.DEBUG
 }
 
-// Workaround for knex not playing well with nconf
-if (process.env.NODE_ENV) {
-  config = {}
-  config[process.env.NODE_ENV] = config
-}
-
 module.exports = config
