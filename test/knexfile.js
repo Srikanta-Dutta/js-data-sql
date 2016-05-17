@@ -8,15 +8,19 @@ if (DB_CLIENT === 'sqlite3') {
   }
 } else {
   connection = {
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || process.env.C9_USER || 'ubuntu',
-    database: process.env.DB_NAME || (process.env.C9_USER ? 'c9' : 'circle_test')
+    host: process.env.DB_HOST || '127.0.0.1',
+    user: process.env.DB_USER,
+    database: process.env.DB_NAME
   }
 }
 
 var config = {
   client: DB_CLIENT,
   connection: connection,
+  pool: {
+    min: 1,
+    max: 10
+  },
   migrations: {
     tableName: 'migrations'
   },
