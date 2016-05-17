@@ -2,18 +2,18 @@
 'use strict'
 
 // prepare environment for js-data-adapter-tests
-require('babel-polyfill')
+'babel-polyfill'
 
-var JSData = require('js-data')
-var JSDataAdapterTests = require('js-data-adapter-tests')
-var JSDataSql = require('./')
+import * as JSData from 'js-data'
+import JSDataAdapterTests from './node_modules/js-data-adapter/dist/js-data-adapter-tests'
+import * as JSDataSql from './src/index'
 
-var assert = global.assert = JSDataAdapterTests.assert
+const assert = global.assert = JSDataAdapterTests.assert
 global.sinon = JSDataAdapterTests.sinon
 
-var DB_CLIENT = process.env.DB_CLIENT || 'mysql'
+const DB_CLIENT = process.env.DB_CLIENT || 'mysql'
 
-var connection
+let connection
 
 if (DB_CLIENT === 'sqlite3') {
   connection = {
@@ -21,9 +21,9 @@ if (DB_CLIENT === 'sqlite3') {
   }
 } else {
   connection = {
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || process.env.C9_USER || 'ubuntu',
-    database: process.env.DB_NAME || (process.env.C9_USER ? 'c9' : 'circle_test')
+    host: process.env.DB_HOST || '127.0.0.1',
+    user: process.env.DB_USER || 'root',
+    database: process.env.DB_NAME || 'test'
   }
 }
 
@@ -36,7 +36,7 @@ JSDataAdapterTests.init({
       client: DB_CLIENT,
       connection: connection,
       pool: {
-        min: 0,
+        min: 1,
         max: 10
       },
       debug: !!process.env.DEBUG
@@ -57,7 +57,6 @@ describe('exports', function () {
     assert(JSDataSql.OPERATORS)
     assert(JSDataSql.OPERATORS['=='])
     assert(JSDataSql.version)
-    assert(JSDataSql.version.full)
   })
 })
 

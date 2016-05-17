@@ -1,6 +1,6 @@
 machine:
   node:
-    version: 4.1.0
+    version: 5.7.0
 database:
   override:
     - DB_CLIENT=mysql npm run migrate-db
@@ -8,7 +8,7 @@ database:
 dependencies:
   pre:
     - npm install -g npm
-    - npm install js-data@^3.0.0-beta.3 pg mysql knex
+    - npm install js-data@^3.0.0-beta.6 pg mysql knex codecov nyc
 test:
-  override:
-    - npm run ci
+  post:
+    - nyc report --reporter=lcov | codecov
